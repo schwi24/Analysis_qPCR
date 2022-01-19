@@ -9,7 +9,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(readxl)
-library(Analysis_qPCR)
+library(corrr)
+devtools::load_all()
+library("Analysis_qPCR")
 ```
 
 
@@ -342,7 +344,7 @@ melt_data %>%
   ggplot(data = ., aes(x = Temperature, y = Derivative, color = Detector, group = Well)) +
     geom_line(alpha = 0.4) +
     facet_grid(facets = (Run ~ Detector)) +
-    labs(y = "Fluorescence change, dF/dT", title = "Melting Curves", tag = "") +
+    labs(x = "Temperature, T", y = "Fluorescence change, dF/dT", title = "Melting Curves", tag = "") +
     theme(plot.title = element_text(hjust = 0.5))
 ```
 
@@ -352,4 +354,144 @@ amplified PCR artefacts (peak at lower temperature). In the other assays, there 
 
 # Delta-Delta CT
 
+```{r ddct}
+## Set calibrator sample and reference detector
+sum_squares <- function(x){sum(x^2)/length(x)}
+
+data <- data %>%
+  ungroup(.) %>%
+  
+  ## Calibrator sample or group
+  mutate(., Calibrator = FALSE) %>%
+  mutate(., Calibrator = replace(Calibrator, Tissue == "SC", TRUE)) %>%
+  
+  ## Reference assay or normalizer
+  mutate(., Reference = FALSE) %>%
+  mutate(., Reference = replace(Reference, Detector == "GAPDH", TRUE))
+
+df <- data %>%
+  
+  group_by(., Detector, Sample) %>%
+  arrange(., Detector, Sample) %>%
+  mutate(., across(.cols = CT, .fns = list(mean_sample_CT = mean, std_sample_CT = sd), .names = "{.fn}")) %>%
+
+  group_by(., Detector, Tissue) %>%
+  arrange(., Detector, Tissue) %>%
+  mutate(., across(.cols = mean_sample_CT, .fns = list(mean_CT = mean, std_CT = sd), .names = "{.fn}")) %>%
+  mutate(., sterr_dCT = sqrt(std_CT^2 + sum_squares(std_sample_CT))) %>%
+  
+  select(., c("Well", "Row", "Column", "Detector", "Sample", "Tissue", "Calibrator", "Reference", "mean_sample_CT", "std_sample_CT", "mean_CT", "std_CT", "sterr_dCT")) %>%
+  distinct(.) %>%
+  ungroup(.) %>%
+  left_join(
+    x = .,
+    y = (
+      filter(., Tissue == "SC") %>%
+        mutate(., dCT = mean_CT) %>%
+        select(., Detector, dCT) %>%
+        distinct(.)
+      ),
+    by = c("Detector" = "Detector")
+  ) %>%
+  mutate(., dCT = mean_sample_CT - dCT) %>%
+  
+  group_by(., Detector, Tissue) %>%
+  arrange(., Detector, Tissue) %>%
+  mutate(., across(.cols = dCT, .fns = list(mean_dCT = mean), .names = "{.fn}")) %>%
+  ungroup(.) %>%
+    left_join(
+      x = .,
+      y = (
+        filter(., Detector == "GAPDH") %>%
+          mutate(., mean_ddCT = mean_dCT) %>%
+          mutate(., sterr_ddCT = sterr_dCT) %>%
+          mutate(., cov_dCT = dCT) %>%
+          select(., Tissue, Sample, mean_ddCT, sterr_ddCT, cov_dCT) %>%
+          distinct(.)
+        ),
+      by = c("Tissue" = "Tissue", "Sample" = "Sample")
+    ) %>%
+    mutate(., mean_ddCT = mean_dCT - mean_ddCT) %>%
+    left_join(
+      x = select(., !cov_dCT),
+      y = (
+        select(., Detector, Tissue, dCT, cov_dCT) %>%
+          group_by(., Detector, Tissue) %>%
+          summarize(across(.cols = c(cov_dCT), ~ cov(., dCT)))
+        ),
+      by = c("Detector" = "Detector", "Tissue" = "Tissue")
+    ) %>%
+    ungroup(.) %>%
+    mutate(., sterr_ddCT = sqrt(abs((sterr_ddCT^2) + (sterr_dCT^2) + 2*cov_dCT))) %>%
+    #mutate(., sterr_ddCT = sqrt((sterr_ddCT^2) + (sterr_dCT^2) - 0)) %>%
+  select(.,
+         c("Well", "Row", "Column", 
+           "Detector", "Sample", "Tissue", "Calibrator", "Reference", 
+           "mean_sample_CT", "std_sample_CT", "mean_CT", "std_CT",
+           "dCT", "mean_dCT", "sterr_dCT",
+           "mean_ddCT", "sterr_ddCT"
+      )
+    )
+df
+
+#square function
+power2<-function(x){
+  2^x
+}
+#inverse square function (square root)
+apower2 <- function(x) {
+  if(x <= 0) {x} else {}
+  log(x, base = 2)
+}
+
+fancy_scientific <- function(l) {
+     # turn in to character string in scientific notation
+     l <- format(l, scientific = TRUE)
+     l <- gsub("0e\\+00","0",l)
+     # quote the part before the exponent to keep all the digits
+     l <- gsub("^(.*)e", "'\\1'e", l)
+     # turn the 'e+' into plotmath format
+     l <- gsub("e", "%*%10^", l)
+     # return this as an expression
+     parse(text=l)
+}
+
+df2 <- df %>%
+  select(
+    .,
+    c(
+      "Detector", "Tissue", "Calibrator", "Reference", 
+      "mean_ddCT", "sterr_ddCT"
+    )
+  ) %>%
+  filter(., Tissue != "water") %>%
+  ungroup(.) %>%
+  mutate(., Lower = mean_ddCT - sterr_ddCT, Higher = mean_ddCT + sterr_ddCT) %>%
+  distinct(.) %>%
+  group_by(., Detector)
+
+```
+
+
+```{r plot_ddct, warning=FALSE, echo=FALSE}
+df2 %>%
+  ggplot(., aes(x = Tissue, y = mean_ddCT, ymin = Lower, ymax = Higher, color = Detector)) +
+    facet_wrap(facets = ~ Detector, ncol = 1) +
+    geom_hline(yintercept = 0, linetype="dotted") +
+    geom_pointrange(shape = 1) +
+    labs(y = "log2(Expression)")
+    
+
+df2 %>%
+  mutate(., mean_ddCT = 2^mean_ddCT, Lower = 2^Lower, Higher = 2^Higher) %>%
+  ggplot(., aes(x = Tissue, y = mean_ddCT, ymin = Lower, ymax = Higher, color = Detector)) +
+    facet_wrap(facets = ~ Detector, ncol = 1) +
+    geom_hline(yintercept = 1, linetype="dotted") +
+    geom_pointrange(shape = 1) +
+    labs(y = "Expression ± SE", title = "Expression Levels in Tissue Samples") +
+    scale_y_continuous(trans = "log2", labels = fancy_scientific, breaks = c(0.001, 0.01, 0.1, 1, 10, 100, 1000)) +
+    expand_limits(y = 0.1) +
+    theme(plot.title = element_text(hjust = 0.5))
+
+```
 
