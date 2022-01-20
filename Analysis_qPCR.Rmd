@@ -7,9 +7,9 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(dev='png')
 library(tidyverse)
 library(readxl)
-library(corrr)
 devtools::load_all()
 library("Analysis_qPCR")
 ```
@@ -97,7 +97,7 @@ data <- left_join(data, samples, by = "Well")
 Investigating the data in unprocessed form is always helpful. We first check the CT values for all samples to spot outliers or "weird" samples.
 This also helps us to compare all samples quickly with the PCR controls, e.g. water sample or 'minus-RT' samples.
 
-```{r plot_ct_sample, warning=FALSE, echo=FALSE}
+```{r plot_ct_sample, warning=FALSE, echo=FALSE, dpi=36, out.height="500px", out.width="700px"}
 data %>%
   arrange(., Detector, Tissue, desc(Sample)) %>%
   ggplot(
@@ -171,7 +171,7 @@ We can already see some issues with two of the assays in the data set:
 
 Next we want to make sure that the problems are not bound to specific positions on the PCR plates.
 
-```{r plot_plate_layout, warning=FALSE, echo=FALSE}
+```{r plot_plate_layout, warning=FALSE, echo=FALSE, dpi=36, out.height="500px", out.width="700px"}
 data %>%
   mutate(
     .,
@@ -338,7 +338,7 @@ melt_data <- melt_files %>%
   map_df(.x = ., .f = ~ read_melt(file_name = .)) 
 ```
 
-```{r plot_melt, warning=FALSE, echo=FALSE}
+```{r plot_melt, echo=FALSE, warning=FALSE, dpi=36, out.height="500px", out.width="700px"}
 melt_data %>%
   group_by(., Run, Well, Detector) %>%
   ggplot(data = ., aes(x = Temperature, y = Derivative, color = Detector, group = Well)) +
@@ -354,7 +354,7 @@ amplified PCR artefacts (peak at lower temperature). In the other assays, there 
 
 # Delta-Delta CT
 
-```{r ddct}
+```{r ddct, include=FALSE}
 ## Set calibrator sample and reference detector
 sum_squares <- function(x){sum(x^2)/length(x)}
 
@@ -444,18 +444,6 @@ apower2 <- function(x) {
   log(x, base = 2)
 }
 
-fancy_scientific <- function(l) {
-     # turn in to character string in scientific notation
-     l <- format(l, scientific = TRUE)
-     l <- gsub("0e\\+00","0",l)
-     # quote the part before the exponent to keep all the digits
-     l <- gsub("^(.*)e", "'\\1'e", l)
-     # turn the 'e+' into plotmath format
-     l <- gsub("e", "%*%10^", l)
-     # return this as an expression
-     parse(text=l)
-}
-
 df2 <- df %>%
   select(
     .,
@@ -473,7 +461,7 @@ df2 <- df %>%
 ```
 
 
-```{r plot_ddct, warning=FALSE, echo=FALSE}
+```{r plot_ddct, warning=FALSE, echo=FALSE, dpi=36, out.height="500px", out.width="700px"}
 df2 %>%
   ggplot(., aes(x = Tissue, y = mean_ddCT, ymin = Lower, ymax = Higher, color = Detector)) +
     facet_wrap(facets = ~ Detector, ncol = 1) +
@@ -481,7 +469,6 @@ df2 %>%
     geom_pointrange(shape = 1) +
     labs(y = "log2(Expression)")
     
-
 df2 %>%
   mutate(., mean_ddCT = 2^mean_ddCT, Lower = 2^Lower, Higher = 2^Higher) %>%
   ggplot(., aes(x = Tissue, y = mean_ddCT, ymin = Lower, ymax = Higher, color = Detector)) +
@@ -492,6 +479,5 @@ df2 %>%
     scale_y_continuous(trans = "log2", labels = fancy_scientific, breaks = c(0.001, 0.01, 0.1, 1, 10, 100, 1000)) +
     expand_limits(y = 0.1) +
     theme(plot.title = element_text(hjust = 0.5))
-
 ```
 
