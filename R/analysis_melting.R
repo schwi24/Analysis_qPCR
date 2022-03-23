@@ -4,13 +4,18 @@
 #' detectors and their line ranges in the csv file.
 #' @param file_name The file to load from.
 #' @return A tibble with three columns: `Detector`, `Position`, and `Length`.
+#' @import dplyr
+#' @import magrittr
+#' @import stringr
 #' @export
 assay_positions <- function(file_name){
 
   # Extract the detectors and their positions.
-  require(tidyverse)
 
-  first <- readLines(con = file.path("data", file_name), n = 1000)
+  first <- readLines(
+    con = file.path("data", file_name),
+    n = 1000
+  )
   assays_pos <- str_which(first, "^Detector")
   assays_name <- first[assays_pos] %>%
     str_replace(., "^Detector = ", "") %>%
@@ -38,12 +43,11 @@ assay_positions <- function(file_name){
 #' @param plate The plate format. The default is `"Plate_96"` but `"Plate_384"` is
 #' also acceptable.
 #' @return A tibble with the melting data.
+#' @import dplyr
+#' @import magrittr
 #' @export
 read_melt <- function(file_name, plate = "Plate_96") {
   # read a '.csv' file with melting data.
-
-  # Dependencies
-  require(tidyverse)
 
   # Initializations
   plt <- tibble(Plate = c("Plate_96", "Plate_384"), Value = 1:2) %>%
@@ -83,7 +87,7 @@ read_melt <- function(file_name, plate = "Plate_96") {
           show_col_types = FALSE
         ) %>%
           mutate(., Detector = detector_i, Variable = variables[j]) %>%
-          mutate(., Run = str_replace(Run, "^data/", "")) %>%
+          #mutate(., Run = str_replace(Run, "^data/", "")) %>%
           pivot_longer(
             data = .,
             cols = starts_with("x_"),
